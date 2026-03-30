@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -218,6 +219,44 @@ type CodeWhispererEvent struct {
 var ModelMap = map[string]string{
 	"claude-sonnet-4-20250514":  "CLAUDE_SONNET_4_20250514_V1_0",
 	"claude-3-5-haiku-20241022": "CLAUDE_3_7_SONNET_20250219_V1_0",
+}
+
+// getModelMapFilePath 获取模型映射配置文件路径
+func getModelMapFilePath() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(homeDir, ".kiro2cc", "models.json")
+}
+
+// loadModelMapFromFile 从外部配置文件加载模型映射，合并到 ModelMap 中（外部配置覆盖默认值）
+func loadModelMapFromFile() {
+	configPath := getModelMapFilePath()
+	if configPath == "" {
+		return
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		// 配置文件不存在不报错，其他错误提示一下
+		if !os.IsNotExist(err) {
+			fmt.Printf("警告: 读取模型映射配置文件失败: %v\n", err)
+		}
+		return
+	}
+
+	var externalMap map[string]string
+	if err := json.Unmarshal(data, &externalMap); err != nil {
+		fmt.Printf("警告: 解析模型映射配置文件失败: %v\n", err)
+		return
+	}
+
+	for k, v := range externalMap {
+		ModelMap[k] = v
+	}
+
+	fmt.Printf("已从 %s 加载 %d 个模型映射\n", configPath, len(externalMap))
 }
 
 // generateUUID generates a simple UUID v4
@@ -570,6 +609,20 @@ func logMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 // startServer 启动HTTP代理服务器
 func startServer(port string) {
+	// 从外部配置文件加载模型映射（启动时加载，修改后需重启服务）
+	loadModelMapFromFile()
+
+	// 打印当前可用的模型映射
+	fmt.Println("当前模型映射:")
+	modelNames := make([]string, 0, len(ModelMap))
+	for k := range ModelMap {
+		modelNames = append(modelNames, k)
+	}
+	sort.Strings(modelNames)
+	for _, k := range modelNames {
+		fmt.Printf("  %s -> %s\n", k, ModelMap[k])
+	}
+
 	// 创建路由器
 	mux := http.NewServeMux()
 
